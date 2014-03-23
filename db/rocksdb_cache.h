@@ -1,6 +1,9 @@
 #ifndef ROCKSDB_CACHE_H
 #define ROCKSDB_CACHE_H
 
+#include <csignal>
+#define ASSERT(TEST) if(!(TEST)) raise(SIGTRAP);
+
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #include <cstddef>
@@ -46,6 +49,7 @@ using namespace rocksdb;
 using boost::lockfree::queue;
 using namespace std;
 
+static const bool MyDebug = true;
 // DECLARE_string(trace_file);
 // DECLARE_int32(num_segments);
 // DECLARE_int32(queue_length);
@@ -54,8 +58,10 @@ using namespace std;
 struct WriteEntry{
   string* key;
   int size;
-  WriteEntry(string* key_=NULL, int size_=0) :
-      key(key_), size(size_) {
+  // 1 if writing, 0 if deleting
+  bool write;
+  WriteEntry(string* key_=NULL, int size_=0, bool write_=true) :
+      key(key_), size(size_), write(write_) {
   }
 };
 
@@ -70,7 +76,7 @@ struct RocksDBCache {
 
   atomic<bool> running;
   atomic<int64_t> successful_reads, failed_reads;
-  atomic<int64_t> read_bytes, write_bytes, deleted_bytes;
+  atomic<int64_t> read_bytes, write_bytes, deleted_items;
 
   int entries_per_batch;
 
@@ -79,6 +85,8 @@ struct RocksDBCache {
 
   int64_t last_read_bytes, last_write_bytes;
   double rt_hit_rate, rt_byte_hit_rate;
+
+  int lines_read;
 
   RandomGenerator gen;
   SNLRUCache* cache;
@@ -102,11 +110,16 @@ struct RocksDBCache {
     failed_reads = 0;
     read_bytes = 0;
     write_bytes = 0;
+    deleted_items = 0;
 
     read_queue_size = 0;
     write_queue_size = 0;
     delete_queue_size = 0;
 
+    last_hit = 0;
+    last_miss = 0;
+    last_hit_bytes = 0;
+    last_miss_bytes = 0;
     last_read_bytes = 0;
     last_write_bytes = 0;
     rt_hit_rate = 0.0;
@@ -121,9 +134,12 @@ struct RocksDBCache {
     cache = new SNLRUCache(cache_size, num_segments);
 
     string trace_file = FLAGS_trace_file;
+      if (MyDebug) {
+        cout << trace_file << endl;
+      }
     ifstream fin(trace_file);
     string line;
-    int k = 0;
+    lines_read = 0;
     string delim = "\t";
     while( getline(fin, line) ) {
       auto ele = split(line, delim);
@@ -131,6 +147,11 @@ struct RocksDBCache {
       auto size = stoi(ele[1]);
 
       bool hit = cache->insert(key, size);
+      if (hit)
+        cache->record_hit(size);
+      else
+        cache->record_miss(size);
+
       auto key_ptr = new string(key);
       if (hit) {
         while(!read_queue.bounded_push(key_ptr));
@@ -138,23 +159,32 @@ struct RocksDBCache {
       }
       else {
         while(!write_queue.bounded_push(
-                WriteEntry(key_ptr, size)));
+                WriteEntry(key_ptr, size, true)));
         write_queue_size++;
       }
 
-      for(auto& k : *cache->get_evicted()) {
-        auto key_ptr = new string(k);
-        while(!delete_queue.bounded_push(key_ptr));
-        delete_queue_size++;
+      for(auto& evicted_key : *cache->get_evicted()) {
+        // can't evict the newly inserted item
+        ASSERT(evicted_key != key);
+        auto key_ptr = new string(evicted_key);
+        (void)key_ptr;
+        while(!write_queue.bounded_push(
+                WriteEntry(key_ptr, -1, false)));
+        write_queue_size++;
       }
-      ++k;
+      cache->clear_evicted();
+      ++lines_read;
 
-      if (k % 1000 == 0) {
-        report_rt_stats(k);
+      // ASSERT(lines_read % 100000 != 0);
+      if (lines_read % 100000 == 0) {
+        report_rt_stats(lines_read);
       }
     }
 
     running = false;
+    cout << "total lines read " << lines_read << endl;
+    printf("read_bytes %.1e, write_bytes %.1e, deleted_items %.1e\n",
+           read_bytes+0.0, write_bytes+0.0, deleted_items+0.0);
     cache->report_stats();
   }
 
@@ -166,28 +196,30 @@ struct RocksDBCache {
       last_read_bytes = read_bytes;
       last_write_bytes = write_bytes;
 
-      if (lines_read % 100000 == 0) {
-        double rt_requests = cache->hit + cache->miss - last_hit - last_miss;
-        double rt_bytes = cache->hit_bytes + cache->miss_bytes \
-          - last_hit_bytes - last_miss_bytes;
-        rt_hit_rate = (cache->hit - last_hit) / rt_requests;
-        rt_byte_hit_rate = (cache->hit_bytes - last_hit_bytes) / rt_bytes;
+      double rt_requests = cache->hit + cache->miss - last_hit - last_miss;
+      double rt_bytes = cache->hit_bytes + cache->miss_bytes \
+        - last_hit_bytes - last_miss_bytes;
+      rt_hit_rate = (cache->hit - last_hit) / rt_requests;
+      rt_byte_hit_rate = (cache->hit_bytes - last_hit_bytes) / rt_bytes;
 
-        last_hit = cache->hit;
-        last_miss = cache->miss;
-        last_hit_bytes = cache->hit_bytes;
-        last_miss_bytes = cache->miss_bytes;
-      }
+      ASSERT(rt_hit_rate > 0);
+
+      last_hit = cache->hit;
+      last_miss = cache->miss;
+      last_hit_bytes = cache->hit_bytes;
+      last_miss_bytes = cache->miss_bytes;
 
       double rqs = read_queue_size;
       double wqs = write_queue_size;
       double dqs = delete_queue_size;
 
-      auto trailer = lines_read % 100000 == 0 ? "\n" : "\r";
-      printf("read-throughput: %.1f MB/sec, write-throughput: %.2f MB/sec, "
+      // auto trailer = lines_read % 100000 == 0 ? "\n" : "\r";
+      auto trailer = "\n";
+      printf("lines_read %d, read-throughput: %.1f MB/sec, write-throughput: %.2f MB/sec, "
              "rt-hit-rate: %.3f, rt-byte-hit-rate: %.3f, "
              "rqs: %.1e, wqs: %.1e, dqs: %.1e"
              "%s",
+             lines_read,
              read_tt, write_tt, rt_hit_rate, rt_byte_hit_rate,
              rqs, wqs, dqs,
              trailer);
@@ -237,8 +269,15 @@ struct RocksDBCache {
       }
       write_queue_size--;
 
-      batch.Put(*entry.key, gen.Generate(entry.size));
-      write_bytes += entry.size;
+      if (entry.write) {
+        batch.Put(*entry.key, gen.Generate(entry.size));
+        write_bytes += entry.size;
+      }
+      else {
+        batch.Delete(*entry.key);
+        deleted_items += 1;
+      }
+
       batch_size += 1;
       delete entry.key;
 
@@ -251,34 +290,38 @@ struct RocksDBCache {
     }
   }
 
-  void deleteFromQueue(ThreadState* thread) {
-    WriteBatch batch;
-    WriteEntry entry;
-    int batch_size;
+  // void deleteFromQueue(ThreadState* thread) {
+  //   WriteBatch batch;
+  //   WriteEntry entry;
+  //   int batch_size;
 
-    batch.Clear();
-    batch_size = 0;
+  //   batch.Clear();
+  //   batch_size = 0;
 
-    string *key;
-    while(running) {
-      if (!delete_queue.pop(key)) {
-        continue;
-      }
-      delete_queue_size--;
+  //   string *key;
+  //   while(running) {
+  //     if (!delete_queue.pop(key)) {
+  //       continue;
+  //     }
+  //     delete_queue_size--;
 
-      batch.Delete(*key);
-      deleted_bytes += entry.size;
-      batch_size += 1;
-      delete key;
+  //     batch.Delete(*key);
+  //     deleted_items += 1;
+  //     batch_size += 1;
+  //     delete key;
 
-      if (batch_size >= entries_per_batch) {
-        auto s = db_->Write(write_options_, &batch);
-        thread->stats.FinishedSingleOp(db_);
-        batch.Clear();
-        batch_size = 0;
-      }
-    }
-  }
+  //     if (batch_size >= entries_per_batch) {
+  //       auto s = db_->Write(write_options_, &batch);
+  //       thread->stats.FinishedSingleOp(db_);
+  //       // if (MyDebug)
+  //       //   cout << "delete " << batch_size
+  //       //        << " deleted items " << deleted_items << endl;
+  //       batch.Clear();
+  //       batch_size = 0;
+  //     }
+
+  //   }
+  // }
 
 };
 

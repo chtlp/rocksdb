@@ -9,8 +9,9 @@ def get_parser():
     parser.add_argument("--num_segments", type=int, default=4)
     parser.add_argument("--queue_length", type=int, default=1000)
 
-    parser.add_argument("--db", default="data/fa/tmp/rocksdb_cache_test")
+    parser.add_argument("--db", default="/data/fa/tmp/rocksdb_cache_test")
     parser.add_argument("--verify_checksum", type=int, default=1)
+    parser.add_argument("--threads", type=int, default=8)
     # maximum number of files to keep open at the same time.
     parser.add_argument("--open_files", type=int, default=500000)
     # don't report stats from rocksdb
@@ -33,14 +34,16 @@ def get_parser():
 
     return parser
 
-if __name__ == '__main___':
+if __name__ == '__main__':
     parser = get_parser()
-    print sys.argv
-    sys.exit(0)
-    args = parser.parse_args(sys.argv[2:])
+    args = parser.parse_args(sys.argv[1:])
 
     cmd = '''
-./db_bench --benchmarks=cache --disable_seek_compaction=1 --mmap_read=0
+./db_bench --benchmarks=cache
+--trace_file {trace_file}
+--num_segments {num_segments}
+--queue_length {queue_length}
+--disable_seek_compaction=1 --mmap_read=0
 --statistics=1 --histogram=1 --stats_interval={stats_interval}
 --block_size={block_size} --cache_size={cache_size} --bloom_bits=10
 --cache_numshardbits=4
@@ -50,9 +53,12 @@ if __name__ == '__main___':
 --write_buffer_size={write_buffer_size}
 --target_file_size_base={target_file_size_base}
 --max_write_buffer_number={write_buffer_number}
---max_background_compactions=${max_background_compactions} --use_existing_db=0
+--max_background_compactions={max_background_compactions} --use_existing_db=0
 -compression_type none
---compaction_style 1 --universal_max_size_amplification_percent 2000
+--compaction_style 1
+--universal_max_size_amplification_percent {universal_space_amplification}
+--threads {threads}
+--nostats_report
 '''.strip()
     cmd = ' '.join(cmd.split('\n'))
-    local(cmd)
+    local(cmd.format(**args.__dict__))

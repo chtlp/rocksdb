@@ -406,6 +406,9 @@ DEFINE_string(hdfs, "", "Name of hdfs environment");
 // posix or hdfs environment
 static rocksdb::Env* FLAGS_env = rocksdb::Env::Default();
 
+
+DEFINE_bool(stats_report, true, "Report stats.");
+
 DEFINE_int64(stats_interval, 0, "Stats are reported every N operations when "
              "this is greater than zero. When 0 the interval grows over time.");
 
@@ -686,7 +689,7 @@ class Stats {
     }
 
     done_++;
-    if (done_ >= next_report_) {
+    if (FLAGS_stats_report && done_ >= next_report_) {
       if (!FLAGS_stats_interval) {
         if      (next_report_ < 1000)   next_report_ += 100;
         else if (next_report_ < 5000)   next_report_ += 500;
@@ -1049,6 +1052,7 @@ class Benchmark {
                ),
     merge_keys_(FLAGS_merge_keys < 0 ? FLAGS_num : FLAGS_merge_keys),
     heap_counter_(0) {
+    rocksdb_cache = NULL;
     if (FLAGS_prefix_size > FLAGS_key_size) {
       fprintf(stderr, "prefix size is larger than key size");
       exit(1);
@@ -1220,7 +1224,9 @@ class Benchmark {
         num_threads++;  // Add extra thread for writing
         method = &Benchmark::ReadWhileWriting;
       } else if (name == Slice("cache")) {
-        num_threads += 2;  // Add extra thread for reading trace and  writing
+        rocksdb_cache = new RocksDBCache(db_, write_options_);
+        num_threads += 3;  // Add extra thread for reading trace,
+                           // writing and deleting
         method = &Benchmark::RunCache;
       } else if (name == Slice("readrandomwriterandom")) {
         method = &Benchmark::ReadRandomWriteRandom;
@@ -2240,20 +2246,20 @@ class Benchmark {
     }
   }
 
-  RocksDBCache *rocksd_db_cache;
+  RocksDBCache *rocksdb_cache;
+
   void RunCache(ThreadState* thread) {
-    RocksDBCache *cache = new RocksDBCache(db_, write_options_);
     if (thread->tid == 0) {
-      cache->procTrace(thread);
+      rocksdb_cache->procTrace(thread);
     }
     else if (thread->tid == 1) {
-      cache->writeFromQueue(thread);
+      rocksdb_cache->writeFromQueue(thread);
     }
-    else if (thread->tid == 2) {
-      cache->deleteFromQueue(thread);
-    }
+    // else if (thread->tid == 2) {
+    //   rocksdb_cache->deleteFromQueue(thread);
+    // }
     else {
-      cache->readFromQueue(thread);
+      rocksdb_cache->readFromQueue(thread);
     }
   }
 

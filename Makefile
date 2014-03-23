@@ -460,3 +460,7 @@ ifneq ($(MAKECMDGOALS),format)
 -include $(DEPFILES)
 endif
 endif
+
+
+debug_cache: db_bench
+	gdb --args db_bench --benchmarks=cache --trace_file trace_a0.50_items1.0e+05_req1.0e+06.tsv --rocksdb_cache_size 10240000 --disable_seek_compaction=1 --mmap_read=0 --stats_interval=-1 --block_size=4096 --cache_size=16777216 --bloom_bits=10 --cache_numshardbits=4 --open_files=500000 --verify_checksum=1 --db=/data/fa/tmp/rocksdb_cache_test --sync=0 --disable_wal=1  --disable_data_sync=0 --write_buffer_size=67108864 --target_file_size_base=67108864 --max_write_buffer_number=3 --max_background_compactions=20 --use_existing_db=0 -compression_type none --compaction_style 1 --universal_max_size_amplification_percent 100 --threads 8 --nostats_report
