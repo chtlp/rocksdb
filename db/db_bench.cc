@@ -65,7 +65,8 @@ DEFINE_string(benchmarks,
               "compress,"
               "uncompress,"
               "acquireload,"
-              "fillfromstdin,",
+              "fillfromstdin,"
+              "cache",
 
               "Comma-separated list of operations to run in the specified order"
               "Actual benchmarks:\n"
@@ -115,6 +116,12 @@ DEFINE_string(benchmarks,
               " port)\n");
 
 DEFINE_int64(num, 1000000, "Number of key/values to place in database");
+
+DEFINE_string(trace_file, "trace.tsv", "where to read the trace");
+DEFINE_int32(num_segments, 4, "number of levels in segmented LRU");
+// 1GB cache by default
+DEFINE_int64(rocksdb_cache_size, 1000000000, "cache size");
+DEFINE_int64(queue_length, 5000, "queue length");
 
 DEFINE_int64(numdistinct, 1000,
              "Number of distinct keys to use. Used in RandomWithVerify to "
@@ -819,7 +826,12 @@ class Duration {
   int64_t ops_;
   double start_at_;
 };
+}
 
+// don't put this in the rocksdb namespace
+#include "rocksdb_cache.h"
+
+namespace rocksdb{
 class Benchmark {
  private:
   shared_ptr<Cache> cache_;
@@ -1207,6 +1219,9 @@ class Benchmark {
       } else if (name == Slice("readwhilewriting")) {
         num_threads++;  // Add extra thread for writing
         method = &Benchmark::ReadWhileWriting;
+      } else if (name == Slice("cache")) {
+        num_threads += 2;  // Add extra thread for reading trace and  writing
+        method = &Benchmark::RunCache;
       } else if (name == Slice("readrandomwriterandom")) {
         method = &Benchmark::ReadRandomWriteRandom;
       } else if (name == Slice("readrandommergerandom")) {
@@ -2222,6 +2237,23 @@ class Benchmark {
           }
         }
       }
+    }
+  }
+
+  RocksDBCache *rocksd_db_cache;
+  void RunCache(ThreadState* thread) {
+    RocksDBCache *cache = new RocksDBCache(db_, write_options_);
+    if (thread->tid == 0) {
+      cache->procTrace(thread);
+    }
+    else if (thread->tid == 1) {
+      cache->writeFromQueue(thread);
+    }
+    else if (thread->tid == 2) {
+      cache->deleteFromQueue(thread);
+    }
+    else {
+      cache->readFromQueue(thread);
     }
   }
 

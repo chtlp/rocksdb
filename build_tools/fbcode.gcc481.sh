@@ -47,6 +47,13 @@ BZIP_LIBS=" $TOOLCHAIN_LIB_BASE/bzip2/bzip2-1.0.6/c3f970a/lib/libbz2.a"
 GFLAGS_INCLUDE=" -I $TOOLCHAIN_LIB_BASE/gflags/gflags-1.6/c3f970a/include"
 GFLAGS_LIBS=" $TOOLCHAIN_LIB_BASE/gflags/gflags-1.6/c3f970a/lib/libgflags.a"
 
+# glog
+GLOG_INCLUDE=" -I $TOOLCHAIN_LIB_BASE/glog/glog-0.3.2/159d449/include"
+GLOG_LIBS=" $TOOLCHAIN_LIB_BASE/glog/glog-0.3.2/159d449/lib/libglog.a"
+
+# boost, I must use boost 1.55 here
+BOOST_INCLUDE=" -I /home/linpengt/Programs/boost_1_55_0"
+
 # location of jemalloc
 JEMALLOC_INCLUDE=" -I $TOOLCHAIN_LIB_BASE/jemalloc/jemalloc-3.4.1/4d53c6f/include/"
 JEMALLOC_LIB=" -Wl,--whole-archive $TOOLCHAIN_LIB_BASE/jemalloc/jemalloc-3.4.1/4d53c6f/lib/libjemalloc.a"
@@ -55,7 +62,7 @@ JEMALLOC_LIB=" -Wl,--whole-archive $TOOLCHAIN_LIB_BASE/jemalloc/jemalloc-3.4.1/4
 export USE_SSE=" -msse -msse4.2 "
 
 CC="$TOOLCHAIN_EXECUTABLES/gcc/gcc-4.8.1/cc6c9dc/bin/gcc"
-CXX="$TOOLCHAIN_EXECUTABLES/gcc/gcc-4.8.1/cc6c9dc/bin/g++ $JINCLUDE $SNAPPY_INCLUDE $ZLIB_INCLUDE $BZIP_INCLUDE $GFLAGS_INCLUDE"
+CXX="$TOOLCHAIN_EXECUTABLES/gcc/gcc-4.8.1/cc6c9dc/bin/g++ $JINCLUDE $SNAPPY_INCLUDE $ZLIB_INCLUDE $BZIP_INCLUDE $GFLAGS_INCLUDE $GLOG_INCLUDE $BOOST_INCLUDE"
 AR=$TOOLCHAIN_EXECUTABLES/binutils/binutils-2.21.1/da39a3e/bin/ar
 RANLIB=$TOOLCHAIN_EXECUTABLES/binutils/binutils-2.21.1/da39a3e/bin/ranlib
 
@@ -66,11 +73,11 @@ CFLAGS+=" -DSNAPPY -DGFLAGS -DZLIB -DBZIP2"
 
 EXEC_LDFLAGS="-Wl,--dynamic-linker,/usr/local/fbcode/gcc-4.8.1-glibc-2.17/lib/ld.so"
 EXEC_LDFLAGS+=" -Wl,--no-whole-archive $TOOLCHAIN_LIB_BASE/libunwind/libunwind-1.0.1/675d945/lib/libunwind.a"
-EXEC_LDFLAGS+=" $HDFSLIB $SNAPPY_LIBS $ZLIB_LIBS $BZIP_LIBS $GFLAGS_LIBS"
+EXEC_LDFLAGS+=" $HDFSLIB $SNAPPY_LIBS $ZLIB_LIBS $BZIP_LIBS $GFLAGS_LIBS $GLOG_LIBS"
 
 PLATFORM_LDFLAGS="$LIBGCC_LIBS $GLIBC_LIBS "
 
-EXEC_LDFLAGS_SHARED="$SNAPPY_LIBS $ZLIB_LIBS $BZIP_LIBS $GFLAGS_LIBS"
+EXEC_LDFLAGS_SHARED="$SNAPPY_LIBS $ZLIB_LIBS $BZIP_LIBS $GFLAGS_LIBS $GLOG_LIBS"
 
 VALGRIND_VER="$TOOLCHAIN_LIB_BASE/valgrind/valgrind-3.8.1/c3f970a/bin/"
 
