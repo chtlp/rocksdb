@@ -27,3 +27,5 @@ coverage/COVERAGE_REPORT
 test
 */test
 *.log
+*.pyc
+trace*
